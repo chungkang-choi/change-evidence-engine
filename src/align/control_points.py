@@ -116,10 +116,43 @@ class ControlPointManager:
         if target is None:
             return
 
-        if target == self.current_point:
-            return
-
+        is_current = (target == self.current_point)
         self.points.remove(target)
+
+        if is_current:
+            # If we deleted the current (active / being input) point, we might need to reset state or handle it.
+            # But normally we delete completed points. Let's make sure self.current_point is always valid.
+            if not self.points:
+                self.current_index = 1
+                self.state = "T1"
+                self.create_next_point()
+            else:
+                self.current_point = self.points[-1]
+                if self.current_point.complete:
+                    self.current_index = int(self.current_point.name[1:]) + 1
+                    self.state = "T1"
+                    self.create_next_point()
+                else:
+                    self.current_index = int(self.current_point.name[1:])
+                    self.state = "T2" if self.current_point.t1 else "T1"
+        else:
+            # We deleted some other point. Let's ensure self.current_point is still consistent or we recreate if needed.
+            # Usually we don't need to change self.current_point unless it is affected, but we should make sure the next point indices remain logical if needed.
+            # The simplest way to keep things robust is to check if current_point is still in self.points.
+            if self.current_point not in self.points:
+                if not self.points:
+                    self.current_index = 1
+                    self.state = "T1"
+                    self.create_next_point()
+                else:
+                    self.current_point = self.points[-1]
+                    if self.current_point.complete:
+                        self.current_index = int(self.current_point.name[1:]) + 1
+                        self.state = "T1"
+                        self.create_next_point()
+                    else:
+                        self.current_index = int(self.current_point.name[1:])
+                        self.state = "T2" if self.current_point.t1 else "T1"
 
     # -------------------------
 
@@ -182,6 +215,15 @@ class ControlPointManager:
     def get_points(self):
         return self.points
     
+    def update_point(self, point_name, image_name, x, y):
+        for p in self.points:
+            if p.name == point_name:
+                if image_name == "T1":
+                    p.t1 = (x, y)
+                elif image_name == "T2":
+                    p.t2 = (x, y)
+                break
+
     def status_text(self):
 
         if self.state == "T1":

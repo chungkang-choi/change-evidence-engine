@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         self.after_img = None
 
         self.cp_manager = ControlPointManager()
+        self.selected_point = None
 
         self.init_ui()
 
@@ -90,6 +91,11 @@ class MainWindow(QMainWindow):
         self.point_tree.setHeaderLabels(
             ["ID","T1","T2"]
         )
+        self.point_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
+
+        self.delete_btn = QPushButton("Delete Point")
+        self.delete_btn.clicked.connect(self.delete_selected_point)
+        self.delete_btn.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; padding: 6px; margin-bottom: 4px;")
 
         self.reset_btn = QPushButton("Reset Points")
         self.reset_btn.clicked.connect(self.reset_points)
@@ -99,6 +105,7 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.lbl_next)
         control_layout.addWidget(self.lbl_step)
         control_layout.addWidget(self.point_tree)
+        control_layout.addWidget(self.delete_btn)
         control_layout.addWidget(self.reset_btn)
         self.update_cp_panel()
 
@@ -172,6 +179,20 @@ class MainWindow(QMainWindow):
         self.status.setText("Images Loaded")
 
     def image_clicked(self, image_name, x, y):
+
+        if self.selected_point is not None:
+            self.cp_manager.update_point(
+                self.selected_point,
+                image_name,
+                x,
+                y
+            )
+            self.update_cp_panel()
+            self.refresh_points()
+            self.status.setText(
+                f"Updated {self.selected_point} {image_name} : ({int(x)}, {int(y)})"
+            )
+            return
 
         expected = self.cp_manager.current_step()
 
@@ -254,6 +275,26 @@ class MainWindow(QMainWindow):
                     p.t2[0],
                     p.t2[1]
                 )
+
+    def on_tree_selection_changed(self):
+        selected_items = self.point_tree.selectedItems()
+        if selected_items:
+            self.selected_point = selected_items[0].text(0)
+        else:
+            self.selected_point = None
+
+    def delete_selected_point(self):
+        if not self.selected_point:
+            self.status.setText("No point selected to delete.")
+            return
+
+        point_name = self.selected_point
+        self.cp_manager.delete_point(point_name)
+        self.selected_point = None
+        self.point_tree.clearSelection()
+        self.update_cp_panel()
+        self.refresh_points()
+        self.status.setText(f"Deleted control point {point_name}")
 
     def reset_points(self):
         self.cp_manager.clear()

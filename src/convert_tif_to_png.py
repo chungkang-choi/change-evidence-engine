@@ -75,6 +75,62 @@ def convert_tif_to_png(tif_path: str, png_dir: str) -> bool:
     except Exception as e:
         print(f"  [ERROR] {png_path} 저장 실패: {e}")
         return False
+def _extract_metadata(tif_path: str) -> dict:
+    """주어진 GeoTIFF에서 메타데이터를 추출합니다.
+
+    Returns:
+        dict: 추출된 메타데이터(dict 형식). key: 파일 이름.
+    """
+    import json
+
+    meta = {}
+    with rasterio.open(tif_path) as src:
+        # CRS (예: EPSG:32652)
+        crs_str = None
+        if src.crs:
+            crs_str = src.crs.to_string().strip() if hasattr(src.crs, 'to_string') else str(src.crs)
+        else:
+            crs_str = None
+        # 변환(Affine)
+        transform = src.transform
+        # 픽셀 크기(res)
+        res = src.res  # (pixel_width, pixel_height)
+        # 모든 필드 수집
+        meta = {
+            'filename': os.path.basename(tif_path),
+            'width': src.width,
+            'height': src.height,
+            'band_count': src.count,
+            'dtype': src.dtypes[0],
+            'crs': crs_str,
+            'transform': [transform.a, transform.b, transform.c,
+                          transform.d, transform.e, transform.f],
+            'pixel_size_x': res[0],
+            'pixel_size_y': res[1],
+            'gsd': res[0]  # 원래 예제에서는 동일한 x/y 픽셀 크기를 사용했습니다
+        }
+    return meta
+def _write_metadata_file(metadata_list: list, metadata_dir: str):
+    """metadata_list (dict entries)를 단일 image_metadata.json으로 저장합니다.
+
+    metadata_dir가 없으면 생성합니다.
+    """
+    import json
+    os.makedirs(metadata_dir, exist_ok=True)
+    out_path = os.path.join(metadata_dir, 'image_metadata.json')
+
+    # 하나의 키로 래핑: "TIF 파일명" → 메타데이터 dict
+    out_dict = {}
+    for entry in metadata_list:
+        key = entry['filename']
+        out_dict[key] = entry
+
+    try:
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(out_dict, f, ensure_ascii=False, indent=2)
+        print(f"Metadata 저장: {out_path}")
+    except Exception as e:
+        print(f"  [ERROR] {out_path} 저장 실패: {e}")
 def main():
     # FIXED: src/convert_tif_to_png.py 바로 위 폴더를 project root로 사용
     script_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,6 +1,6 @@
 # Change Evidence Project Status
 
-> Last verified: 2026-08-20  
+> Last verified: 2026-08-23  
 > Purpose: AI coding agents (Cursor, Cline, etc.) can quickly understand the current project state before making changes.
 
 ---
@@ -16,9 +16,11 @@
 | Step | Name | Status |
 |------|------|--------|
 | STEP 1-A | GeoTIFF → PNG conversion | **Implemented** (script exists and runs) |
-| STEP 1-B | GeoTIFF metadata extraction → JSON | **Partial** (helper functions exist; not wired to `main()`) |
+| STEP 1-B | GeoTIFF metadata extraction → JSON | **Implemented** (wired into `main()`, verified working) |
 | STEP 2 | Manual alignment GUI (control points) | **Partial** (CP input UI done; affine/warp/save not done) |
 | STEP 3+ | Aligned output, masks, change detection | **Not started** |
+
+**STEP 1 is now complete and verified end-to-end** (TIF → PNG + metadata JSON).
 
 ---
 
@@ -33,7 +35,7 @@ change-evidence-engine/
 ├── projects/
 │   ├── tif/                   # Original GeoTIFF inputs (4 files)
 │   ├── png/                   # Derived PNGs (4 files)
-│   ├── metadata/              # Empty (no JSON yet)
+│   ├── metadata/              # image_metadata.json (generated)
 │   ├── aligned/               # Empty (placeholder)
 │   └── masks/                 # Empty (placeholder)
 ├── src/
@@ -76,7 +78,7 @@ change-evidence-engine/
 | Path | Status |
 |------|--------|
 | `projects/png/` | **4 PNG files** — derived from TIF (same basenames) |
-| `projects/metadata/` | **Empty folder** — no `image_metadata.json` |
+| `projects/metadata/` | **`image_metadata.json` present** — generated for all 4 TIFs |
 | `projects/aligned/` | **Empty folder** — no aligned outputs |
 | `projects/masks/` | **Empty folder** — no mask files |
 
@@ -89,6 +91,8 @@ change-evidence-engine/
 | `speeddom_1330.png` | 14.98 MB |
 | `speeddom_1430.png` | 12.91 MB |
 
+**`projects/metadata/image_metadata.json`** — single JSON keyed by TIF filename, containing per-file: `filename`, `width`, `height`, `band_count`, `dtype`, `crs`, `transform` (6 affine coefficients), `pixel_size_x`, `pixel_size_y`, `gsd`. All 4 TIFs use `EPSG:32652`.
+
 ---
 
 ## 6. STEP 1 Status
@@ -98,7 +102,7 @@ change-evidence-engine/
 | Item | Status |
 |------|--------|
 | File exists | **Yes** |
-| File empty | **No** (~166 lines) |
+| File empty | **No** (~176 lines) |
 | Scans `projects/tif/*.tif` | **Yes** |
 | Writes to `projects/png/*.png` | **Yes** |
 | Band → RGB conversion | **Yes** (1/2/3+ bands handled) |
@@ -110,11 +114,12 @@ change-evidence-engine/
 
 | Item | Status |
 |------|--------|
-| `_extract_metadata()` | **Implemented** (not called from `main()`) |
-| `_write_metadata_file()` | **Implemented** (not called from `main()`) |
-| Output `projects/metadata/image_metadata.json` | **Not generated yet** |
+| `_extract_metadata()` | **Implemented** and **called from `main()`** |
+| `_write_metadata_file()` | **Implemented** and **called from `main()`** |
+| Output `projects/metadata/image_metadata.json` | **Generated** — verified for all 4 sample TIFs |
+| Per-file metadata extraction failure handling | **Yes** — individual try/except, does not abort the batch |
 
-### How to run STEP 1-A
+### How to run STEP 1 (PNG + metadata)
 
 ```bash
 python src/convert_tif_to_png.py
@@ -122,7 +127,7 @@ python src/convert_tif_to_png.py
 
 Requires: `rasterio`, `pillow` (available in system Python and `venv`).
 
-**Note:** Running the script overwrites existing PNGs in `projects/png/`.
+**Note:** Running the script overwrites existing PNGs in `projects/png/` and regenerates `projects/metadata/image_metadata.json`.
 
 ---
 
@@ -201,9 +206,10 @@ Usable for STEP 1 only (no OpenCV / PySide6):
 
 ## 10. Next Development Step
 
-**Immediate goal: complete STEP 1**
+**STEP 1 is complete and verified (PNG conversion + metadata JSON).**
 
-1. GeoTIFF → PNG (STEP 1-A) — already working; verify on sample TIFs if needed.
-2. GeoTIFF metadata → `projects/metadata/image_metadata.json` (STEP 1-B) — wire `_extract_metadata()` and `_write_metadata_file()` into `main()` in `src/convert_tif_to_png.py`.
+**Next goal: STEP 2 backend**
 
-After STEP 1 is verified end-to-end, proceed to STEP 2 backend: implement `src/align/affine.py` and connect alignment execution in `align_images.py`.
+1. Implement `src/align/affine.py` — compute affine transform from ≥3 completed control points (e.g. via `cv2.estimateAffinePartial2D`).
+2. Connect alignment execution in `align_images.py` — add an "Align" action that uses `ready_for_alignment()` and applies the computed transform (warp).
+3. After affine/warp is verified, implement `project_io.py` (save/load CP + transform) and `polygon.py` (ROI) as separate, small steps.

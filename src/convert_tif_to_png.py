@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-STEP 1-A: GeoTIFF → PNG 변환기
+STEP 1: GeoTIFF → PNG 변환 + Metadata 추출
 
 projects/tif/*.tif 파일을 projects/png/*.png로 변환하며,
 기존 PNG 파일을 덮어씁니다.
 
-metadata는 생성하지 않으며(STEP 1-B에서 구현),
-적어도 하나의 샘플에서 정상적으로 작동해야 합니다.
+각 GeoTIFF에서 메타데이터(CRS, transform, 픽셀 크기 등)를 추출하여
+projects/metadata/image_metadata.json으로 저장합니다(STEP 1-B).
 """
 
 import os
@@ -137,6 +137,7 @@ def main():
     project_root = os.path.dirname(script_dir)  # c:/Users/.../change-evidence-engine
     tif_dir = os.path.join(project_root, 'projects', 'tif')
     png_dir = os.path.join(project_root, 'projects', 'png')
+    metadata_dir = os.path.join(project_root, 'projects', 'metadata')
 
     if not os.path.isdir(tif_dir):
         print(f"Input 폴더가 존재하지 않습니다: {tif_dir}")
@@ -153,12 +154,21 @@ def main():
         sys.exit(0)  # 빈 폴더는 정상적일 수 있습니다
 
     success = 0
+    metadata_list = []
     for tif_path in tif_files:
         print(f"Converting: {os.path.basename(tif_path)}")
         if convert_tif_to_png(tif_path, png_dir):
             success += 1
         else:
             print(f"  [FAIL] {os.path.basename(tif_path)}")
+
+        try:
+            metadata_list.append(_extract_metadata(tif_path))
+        except Exception as e:
+            print(f"  [ERROR] {os.path.basename(tif_path)} metadata 추출 실패: {e}")
+
+    if metadata_list:
+        _write_metadata_file(metadata_list, metadata_dir)
 
     print(f"\n완료: {success}개 성공, {len(tif_files)-success}개 실패")
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
+import os
 import sys
 import cv2
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -11,11 +13,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QVBoxLayout,
     QTreeWidget,
-    QTreeWidgetItem
+    QTreeWidgetItem,
+    QSlider,
 )
 
 from image_view import ImageView
 from control_points import ControlPointManager
+from affine import compute_affine, warp_image
 
 class MainWindow(QMainWindow):
 
@@ -27,6 +31,11 @@ class MainWindow(QMainWindow):
 
         self.before_img = None
         self.after_img = None
+        self.before_path = None
+        self.after_path = None
+
+        # STEP 2-D: Alignment 결과 (aligned T2)
+        self.aligned_img = None
 
         self.cp_manager = ControlPointManager()
         self.selected_point = None
@@ -75,8 +84,32 @@ class MainWindow(QMainWindow):
         after_layout.addWidget(after_title)
         after_layout.addWidget(self.after_view)
 
+        # ----------------------------
+        # Overlay 영역 (STEP 2-D)
+        # ----------------------------
+        overlay_layout = QVBoxLayout()
 
+        overlay_title = QLabel("Overlay (T1 + Aligned T2)")
+        overlay_title.setStyleSheet("font-weight:bold;")
 
+        self.overlay_view = ImageView("Overlay")
+
+        self.align_btn = QPushButton("Run Alignment")
+        self.align_btn.clicked.connect(self.run_alignment)
+        self.align_btn.setStyleSheet("background-color: #4caf50; color: white; font-weight: bold; padding: 6px;")
+
+        self.opacity_label = QLabel("T2 Opacity: 50")
+
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(50)
+        self.opacity_slider.valueChanged.connect(self.on_opacity_changed)
+
+        overlay_layout.addWidget(overlay_title)
+        overlay_layout.addWidget(self.overlay_view)
+        overlay_layout.addWidget(self.align_btn)
+        overlay_layout.addWidget(self.opacity_label)
+        overlay_layout.addWidget(self.opacity_slider)
 
         control_layout = QVBoxLayout()
 
@@ -117,6 +150,7 @@ class MainWindow(QMainWindow):
 
         image_layout.addLayout(before_layout,3)
         image_layout.addLayout(after_layout,3)
+        image_layout.addLayout(overlay_layout,3)
         image_layout.addLayout(control_layout,1)
 
         # ----------------------------
@@ -172,6 +206,9 @@ class MainWindow(QMainWindow):
         if self.before_img is None or self.after_img is None:
             self.status.setText("Image Load Failed")
             return
+
+        self.before_path = before_path
+        self.after_path = after_path
 
         self.before_view.set_cv_image(self.before_img)
         self.after_view.set_cv_image(self.after_img)
@@ -301,6 +338,73 @@ class MainWindow(QMainWindow):
         self.update_cp_panel()
         self.refresh_points()
         self.status.setText("All Control Points Reset")
+
+    # --------------------------------------------------
+    # STEP 2-D: Alignment 실행 + Overlay
+    # --------------------------------------------------
+
+    def run_alignment(self):
+
+        if self.before_img is None or self.after_img is None:
+            self.status.setText("Please load both T1 and T2 images first.")
+            return
+
+        completed = self.cp_manager.completed_points()
+
+        if len(completed) < 3:
+            self.status.setText(
+                f"Alignment requires at least 3 completed Control Points. (currently {len(completed)})"
+            )
+            return
+
+        matrix = compute_affine(completed)
+
+        if matrix is None:
+            self.status.setText("Affine calculation failed. Check Control Points.")
+            return
+
+        t1_h, t1_w = self.before_img.shape[:2]
+
+        aligned = warp_image(self.after_img, matrix, (t1_w, t1_h))
+
+        if aligned is None:
+            self.status.setText("Warp failed.")
+            return
+
+        self.aligned_img = aligned
+
+        # T1을 base로, aligned T2를 overlay로 표시 (기존 opacity 값 유지)
+        self.overlay_view.set_cv_image(self.before_img)
+        self.overlay_view.set_overlay_image(self.aligned_img)
+        self.overlay_view.set_overlay_opacity(self.opacity_slider.value() / 100.0)
+
+        self._save_aligned_image()
+
+    def on_opacity_changed(self, value):
+
+        self.opacity_label.setText(f"T2 Opacity: {value}")
+        self.overlay_view.set_overlay_opacity(value / 100.0)
+
+    def _save_aligned_image(self):
+
+        if self.aligned_img is None or not self.after_path:
+            return
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(script_dir))
+        aligned_dir = os.path.join(project_root, "projects", "aligned")
+
+        os.makedirs(aligned_dir, exist_ok=True)
+
+        t2_stem = os.path.splitext(os.path.basename(self.after_path))[0]
+        out_path = os.path.join(aligned_dir, f"aligned_{t2_stem}.png")
+
+        ok = cv2.imwrite(out_path, self.aligned_img)
+
+        if ok:
+            self.status.setText(f"Alignment complete. Saved: {out_path}")
+        else:
+            self.status.setText("Alignment complete, but saving aligned image failed.")
 
 
 def main():

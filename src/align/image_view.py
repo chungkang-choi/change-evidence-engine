@@ -37,6 +37,11 @@ class ImageView(QGraphicsView):
         self.cv_image = None
 
         # -----------------------------
+        # Overlay (STEP 2-D)
+        # -----------------------------
+        self.overlay_pixmap_item = None
+
+        # -----------------------------
         # Point 관리
         # -----------------------------
         self.point_items = []
@@ -79,6 +84,9 @@ class ImageView(QGraphicsView):
 
         self.point_items.clear()
 
+        # scene.clear()가 기존 overlay item도 함께 제거하므로 참조를 초기화한다.
+        self.overlay_pixmap_item = None
+
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
 
         self.scene.addItem(self.pixmap_item)
@@ -91,6 +99,52 @@ class ImageView(QGraphicsView):
             self.scene.sceneRect(),
             Qt.KeepAspectRatio,
         )
+
+    # --------------------------------------------------
+    # Overlay (STEP 2-D)
+    # --------------------------------------------------
+
+    def set_overlay_image(self, image):
+
+        # base 이미지(예: T1) 위에 aligned T2 등을 겹쳐서 표시한다.
+        # base 이미지와 point 표시 로직은 그대로 유지된다.
+
+        if self.overlay_pixmap_item is not None:
+
+            self.scene.removeItem(self.overlay_pixmap_item)
+
+            self.overlay_pixmap_item = None
+
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        h, w, ch = rgb.shape
+
+        bytes_per_line = ch * w
+
+        qimg = QImage(
+            rgb.data,
+            w,
+            h,
+            bytes_per_line,
+            QImage.Format_RGB888,
+        )
+
+        pixmap = QPixmap.fromImage(qimg)
+
+        self.overlay_pixmap_item = QGraphicsPixmapItem(pixmap)
+
+        # base 이미지보다 위에 그려지도록 설정
+        self.overlay_pixmap_item.setZValue(1)
+
+        self.scene.addItem(self.overlay_pixmap_item)
+
+    # --------------------------------------------------
+
+    def set_overlay_opacity(self, opacity):
+
+        if self.overlay_pixmap_item is not None:
+
+            self.overlay_pixmap_item.setOpacity(opacity)
 
     # --------------------------------------------------
     # Point Drawing

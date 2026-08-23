@@ -17,10 +17,15 @@
 |------|------|--------|
 | STEP 1-A | GeoTIFF → PNG conversion | **Implemented** (script exists and runs) |
 | STEP 1-B | GeoTIFF metadata extraction → JSON | **Implemented** (wired into `main()`, verified working) |
-| STEP 2 | Manual alignment GUI (control points) | **Partial** (CP input UI done; affine/warp/save not done) |
-| STEP 3+ | Aligned output, masks, change detection | **Not started** |
+| STEP 2-A | Alignment GUI + Control Point input/edit/delete | **Implemented** |
+| STEP 2-B | Control Point → Affine Matrix (`compute_affine`) | **Implemented** (verified, not yet wired to GUI) |
+| STEP 2-C | Affine Matrix → T2 Warp (`warp_image`) | **Implemented** (verified, not yet wired to GUI) |
+| STEP 2-D | T1 + aligned T2 Overlay | **Not started** |
+| STEP 2-E+ | GSD comparison/resampling, pixel frame, ROI, project save | **Not started** |
+| STEP 3+ | Masks, change detection | **Not started** |
 
-**STEP 1 is now complete and verified end-to-end** (TIF → PNG + metadata JSON).
+**STEP 1 is complete and verified end-to-end** (TIF → PNG + metadata JSON).  
+**STEP 2-B and STEP 2-C are complete and independently verified** (Affine calculation + Warp), but **not yet connected to the GUI** (`align_images.py` unchanged).
 
 ---
 
@@ -36,7 +41,7 @@ change-evidence-engine/
 │   ├── tif/                   # Original GeoTIFF inputs (4 files)
 │   ├── png/                   # Derived PNGs (4 files)
 │   ├── metadata/              # image_metadata.json (generated)
-│   ├── aligned/               # Empty (placeholder)
+│   ├── aligned/               # aligned_seoul_park_3PM.png (test output, STEP 2-C)
 │   └── masks/                 # Empty (placeholder)
 ├── src/
 │   ├── convert_tif_to_png.py  # STEP 1 entry point
@@ -44,9 +49,10 @@ change-evidence-engine/
 │       ├── align_images.py    # STEP 2 GUI entry point
 │       ├── image_view.py
 │       ├── control_points.py
-│       ├── affine.py          # Empty (0 bytes)
+│       ├── affine.py          # compute_affine() + warp_image() implemented (STEP 2-B/2-C)
 │       ├── polygon.py         # Empty (0 bytes)
 │       └── project_io.py      # Empty (0 bytes)
+├── .gitignore                 # excludes __pycache__/, *.pyc, venv/
 └── venv/                      # Local virtualenv (not tracked in git)
 ```
 
@@ -79,7 +85,7 @@ change-evidence-engine/
 |------|--------|
 | `projects/png/` | **4 PNG files** — derived from TIF (same basenames) |
 | `projects/metadata/` | **`image_metadata.json` present** — generated for all 4 TIFs |
-| `projects/aligned/` | **Empty folder** — no aligned outputs |
+| `projects/aligned/` | **1 test output** — `aligned_seoul_park_3PM.png` (from STEP 2-C independent verification; not produced via GUI) |
 | `projects/masks/` | **Empty folder** — no mask files |
 
 **PNG files in `projects/png/`:**
@@ -153,13 +159,25 @@ cd src/align
 | Point reset (clear all) | **Implemented** |
 | Load images (file dialog, PNG only) | **Implemented** |
 | `ready_for_alignment()` (≥3 complete CPs) | **Implemented in code** — not used in UI |
-| Affine transform calculation | **Not implemented** (`affine.py` empty) |
-| Warp / apply transform | **Not implemented** |
-| Overlay (before/after blend) | **Not implemented** |
+| Affine transform calculation (`compute_affine()` in `affine.py`) | **Implemented** — `cv2.estimateAffine2D`, T2 → T1 direction, min 3 points, verified with real georeferenced test points (max reprojection error 0.0003px) |
+| Warp / apply transform (`warp_image()` in `affine.py`) | **Implemented** — `cv2.warpAffine`, output size = T1 dimensions, verified end-to-end with real project PNGs (`seoul_park_1PM`/`seoul_park_3PM`) |
+| GUI "Align" button / wiring `affine.py` into `align_images.py` | **Not implemented** — functions verified independently only, GUI untouched |
+| Overlay (before/after blend) | **Not implemented** (STEP 2-D) |
+| GSD comparison / resampling | **Not implemented** |
 | Polygon ROI | **Not implemented** (`polygon.py` empty) |
 | Project save / load | **Not implemented** (`project_io.py` empty) |
 | Auto-load from `projects/png/` | **Not implemented** |
 | Zoom / pan | **Not implemented** (`NoDrag`, `fitInView` only) |
+
+### `affine.py` detail (STEP 2-B / STEP 2-C)
+
+| Item | Status |
+|------|--------|
+| `compute_affine(control_points)` | **Implemented** — reads `point.t1`/`point.t2` from existing `ControlPoint` structure; returns 2×3 `numpy.ndarray` or `None` if fewer than 3 completed points |
+| `warp_image(image, affine_matrix, output_size)` | **Implemented** — thin wrapper around `cv2.warpAffine`, no re-computation or inversion of the matrix |
+| Direction | **T2 → T1** (verified) |
+| Tested with GUI | **No** — independent script-based test only, using `ControlPoint` objects built from real TIF georeference (test-data generation only; `affine.py` itself does not read metadata/CRS) |
+| Metadata/CRS usage inside `affine.py` | **None** (by design for this step) |
 
 ---
 
@@ -201,15 +219,17 @@ Usable for STEP 1 only (no OpenCV / PySide6):
 - **Analyze existing code** before implementing new features.
 - Avoid **unnecessary refactoring**.
 - **Validate one STEP** before moving to the next.
+- `__pycache__/`, `*.pyc`, `venv/` are excluded via `.gitignore` — do not commit build artifacts.
 
 ---
 
 ## 10. Next Development Step
 
-**STEP 1 is complete and verified (PNG conversion + metadata JSON).**
+**STEP 1 is complete** (PNG conversion + metadata JSON).  
+**STEP 2-B (Affine calculation) and STEP 2-C (Warp) are complete and independently verified**, but not yet wired into the GUI.
 
-**Next goal: STEP 2 backend**
+**Next goal: STEP 2-D — Overlay**
 
-1. Implement `src/align/affine.py` — compute affine transform from ≥3 completed control points (e.g. via `cv2.estimateAffinePartial2D`).
-2. Connect alignment execution in `align_images.py` — add an "Align" action that uses `ready_for_alignment()` and applies the computed transform (warp).
-3. After affine/warp is verified, implement `project_io.py` (save/load CP + transform) and `polygon.py` (ROI) as separate, small steps.
+1. Wire `compute_affine()` + `warp_image()` into `align_images.py` (e.g. an "Align" button using `ready_for_alignment()`).
+2. Implement Overlay: blend T1 + `aligned_T2` (e.g. `cv2.addWeighted`) with an opacity control, to visually confirm registration quality in the GUI.
+3. After Overlay is verified, proceed to GSD comparison/resampling, then `project_io.py` (save/load CP + transform) and `polygon.py` (ROI) as separate, small steps.

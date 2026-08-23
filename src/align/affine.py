@@ -1,15 +1,16 @@
 """
 STEP 2-B: Control Point → Affine Matrix 계산
+STEP 2-C: Affine Matrix → T2 Warp
 
 완료된 Control Point 쌍(T1 좌표 ↔ T2 좌표)으로부터
-T2 → T1 방향의 Affine Transformation Matrix를 계산합니다.
+T2 → T1 방향의 Affine Transformation Matrix를 계산하고,
+이 Matrix를 이용해 T2 이미지를 T1 좌표계로 Warp합니다.
 
 T1이 기준(Baseline) 좌표계이므로, 변환 방향은 항상
     T2 좌표 → T1 좌표
 이어야 합니다 (그 반대가 아닙니다).
 
-이 모듈은 Affine Matrix 계산까지만 담당하며,
-Warp/Overlay/저장 등은 이후 단계(STEP 2-C)에서 다룹니다.
+Overlay/저장 경로 관리/GSD 등은 이후 단계에서 다룹니다.
 """
 
 import numpy as np
@@ -51,3 +52,27 @@ def compute_affine(control_points):
         return None
 
     return matrix
+
+
+def warp_image(image, affine_matrix, output_size):
+    """T2 → T1 Affine Matrix를 이용해 이미지를 T1 좌표계로 Warp합니다.
+
+    Args:
+        image: Warp할 원본 이미지 (T2). compute_affine()과 동일하게
+            cv2.imread()로 읽은 numpy array를 그대로 사용합니다 (channel 순서 변경 없음).
+        affine_matrix: compute_affine()이 반환한 2x3 T2 → T1 Affine Matrix.
+            (이 함수에서 다시 계산하거나 inverse를 적용하지 않습니다.)
+        output_size: (width, height) — T1 PNG의 pixel dimensions 기준 출력 크기.
+
+    Returns:
+        numpy.ndarray | None: T1 좌표계로 정렬된 이미지. 입력이 유효하지 않으면 None.
+    """
+    if affine_matrix is None:
+        print("  [ERROR] Warp 실패: affine_matrix가 None입니다.")
+        return None
+
+    if image is None:
+        print("  [ERROR] Warp 실패: 입력 이미지가 None입니다.")
+        return None
+
+    return cv2.warpAffine(image, affine_matrix, output_size)

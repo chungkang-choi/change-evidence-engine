@@ -1,6 +1,6 @@
 # Change Evidence Project Status
 
-> Last verified: 2026-08-23
+> Last verified: 2026-08-23 (STEP 2-F update)
 > Purpose: AI coding agents (Cursor, Cline, etc.) can quickly understand the current project state before making changes.
 > This document only contains verified facts about the actual codebase. Do not add speculative or planned content as if it were already implemented.
 
@@ -32,7 +32,7 @@
     ↓
 PoC 데이터 확보            ✅ 완료
     ↓
-MVP 구현                   ◀ 현재 (STEP 1 + STEP 2-A~E complete, STEP 3+ not started)
+MVP 구현                   ◀ 현재 (STEP 1 + STEP 2-A~F complete, STEP 3+ not started)
     ↓
 포트폴리오 제작
     ↓
@@ -54,15 +54,16 @@ MVP 구현                   ◀ 현재 (STEP 1 + STEP 2-A~E complete, STEP 3+ n
 | STEP 2-B | Control Point → Affine Matrix (`compute_affine`) | **✅ Implemented & verified** |
 | STEP 2-C | Affine Matrix → T2 Warp (`warp_image`) | **✅ Implemented & verified** |
 | STEP 2-D | T1 + Aligned T2 Overlay + Opacity Slider + "Run Alignment" button | **✅ Implemented & verified** (committed) |
-| STEP 2-E | GSD comparison (Ratio/Difference) + GUI info display | **✅ Implemented & verified** (uncommitted — see Section 7) |
-| STEP 2 remaining | GSD Resampling, Pixel Frame unification, Polygon ROI, Project Save/Load | **❌ Not implemented** |
+| STEP 2-E | GSD comparison (Ratio/Difference) + GUI info display | **✅ Implemented & verified** (committed) |
+| STEP 2-F | Project Save / Load (`project_io.py`) | **✅ Implemented & verified** (uncommitted — see Section 9) |
+| STEP 2 remaining | GSD Resampling, Pixel Frame unification, Polygon ROI | **❌ Not implemented** |
 | STEP 3 | Brightness Normalization | **❌ Not started** |
 | STEP 4 | Change Detection | **❌ Not started** |
 | STEP 5 | Region Extraction | **❌ Not started** |
 | STEP 6 | Visualization | **❌ Not started** |
 | STEP 7 | Report | **❌ Not started** |
 
-**Current most important next task**: decide whether to commit STEP 2-E, then move on to STEP 2 remaining items (Polygon ROI / Project Save-Load) or proceed directly to STEP 3, per user decision.
+**Current most important next task**: decide whether to commit STEP 2-F, then move on to Polygon ROI or proceed directly to STEP 3, per user decision.
 
 ---
 
@@ -80,17 +81,17 @@ change-evidence-engine/
 │   ├── tif/                   # Original GeoTIFF inputs (4 files, do not modify)
 │   ├── png/                   # Derived PNGs (4 files)
 │   ├── metadata/              # image_metadata.json (generated)
-│   ├── aligned/                # aligned_seoul_park_3PM.png (STEP 2-C/D output)
+│   ├── aligned/                # aligned_<T2>_<timestamp>.png files (STEP 2-C/D output, one per Run Alignment execution)
 │   └── masks/                 # Empty (placeholder, unused)
 ├── src/
 │   ├── convert_tif_to_png.py  # STEP 1 entry point — fully implemented
 │   └── align/
-│       ├── align_images.py    # STEP 2 GUI entry point (STEP 2-A/B/C/D/E wired in)
+│       ├── align_images.py    # STEP 2 GUI entry point (STEP 2-A/B/C/D/E/F wired in)
 │       ├── image_view.py
 │       ├── control_points.py
 │       ├── affine.py          # compute_affine() + warp_image() (STEP 2-B/2-C)
 │       ├── polygon.py         # Empty (0 bytes) — not implemented
-│       └── project_io.py      # Empty (0 bytes) — not implemented
+│       └── project_io.py      # save_project()/load_project() + helpers (STEP 2-F) — implemented
 ├── .gitignore                 # excludes __pycache__/, *.pyc, venv/
 └── venv/                      # Local virtualenv (not tracked in git)
 ```
@@ -179,8 +180,9 @@ This is why the pipeline in Section 9 explicitly separates **Metadata capture �
 |------|--------|
 | `projects/png/` | **4 PNG files** — derived from TIF (same basenames), pixel-identical dimensions to source TIF |
 | `projects/metadata/` | **`image_metadata.json` present** — generated for all 4 TIFs |
-| `projects/aligned/` | **1 output** — `aligned_seoul_park_3PM.png`, produced via the GUI's "Run Alignment" button (STEP 2-D) |
+| `projects/aligned/` | Output of the GUI's "Run Alignment" button (STEP 2-D). Filenames are `aligned_<T2 stem>_<YYYYMMDD_HHMMSS>.png` — **each Run Alignment execution creates a new, uniquely-named file** and never overwrites a previous result or the original T1/T2 PNG inputs (fixed after STEP 2-F; previously it always overwrote a fixed `aligned_<T2>.png` name). Currently contains one pre-existing tracked file (`aligned_seoul_park_3PM.png`, from before this fix) plus one untracked leftover (`aligned_speeddom_1430.png`). |
 | `projects/masks/` | **Empty folder** — no mask files (STEP 4, not started) |
+| `projects/project.json` | **Not present by default** — STEP 2-F's "Save Project" suggests this path as the default save location (see Section 9), but no project file has been committed to the repo yet. |
 
 **`projects/metadata/image_metadata.json`** — single JSON keyed by TIF filename, containing per-file: `filename`, `width`, `height`, `band_count`, `dtype`, `crs`, `transform` (6 affine coefficients), `pixel_size_x`, `pixel_size_y`, `gsd`. All 4 TIFs use `EPSG:32652`.
 
@@ -247,12 +249,12 @@ cd src/align
 | "Run Alignment" button wiring `compute_affine()` + `warp_image()` into GUI | **✅ Implemented** — gated on ≥3 completed Control Points |
 | Overlay (T1 + aligned T2, `QGraphicsPixmapItem` two-layer) | **✅ Implemented** |
 | Opacity Slider (0–100, real-time via `setOpacity()`) | **✅ Implemented** |
-| Aligned image auto-save (`projects/aligned/aligned_<T2>.png`) | **✅ Implemented** |
+| Aligned image auto-save (`projects/aligned/aligned_<T2>_<timestamp>.png`) | **✅ Implemented** — each Run Alignment execution writes a new, uniquely-timestamped file; never overwrites a previous result or the original input PNGs |
 | GSD Ratio / Difference calculation + GUI info display | **✅ Implemented** (STEP 2-E, see detail below) |
+| Project Save / Load (`project_io.py`) | **✅ Implemented** (STEP 2-F, see detail below) |
 | GSD Resampling / normalization | **❌ Not implemented** — intentionally deferred (see STEP 2-E conclusion below) |
 | Pixel Frame unification (`pixel_frame.json`) | **❌ Not implemented** |
 | Polygon ROI (`polygon.py`) | **❌ Not implemented** (file empty) |
-| Project Save / Load (`project_io.py`) | **❌ Not implemented** (file empty) |
 | Auto-load from `projects/png/` | **❌ Not implemented** (manual file dialog only) |
 | Zoom / pan | **❌ Not implemented** (`NoDrag`, `fitInView` only) |
 
@@ -272,7 +274,20 @@ cd src/align
 - **GSD = None / metadata file missing**: handled gracefully — displays `N/A` / `GSD unavailable` / `image_metadata.json not found`, without crashing and without blocking the Alignment workflow.
 - **Verified conclusion**: for the current real data (GSD differences ~1–1.2%), the existing 6-DOF `compute_affine()` (via `cv2.estimateAffine2D`) already absorbs the GSD/scale difference implicitly, since Control Points are picked at matching real-world locations in each image's own native pixel grid. The computed affine scale factor for the Seoul Park pair (~0.9894) matches the real GSD ratio (0.989361) to 5 decimal places. **No separate GSD resampling step is required for current data.** This should be revisited if a future dataset has a much larger GSD difference.
 - **Files touched**: only `src/align/align_images.py` (new module-level helper functions + `update_gsd_info()` method + `gsd_info_label` widget in the Overlay panel). `affine.py`, `image_view.py`, `control_points.py`, `polygon.py`, `project_io.py`, and `image_metadata.json` were **not** modified.
-- **Commit status**: implemented and verified, but **not yet committed** (`git status` shows `M src/align/align_images.py`).
+- **Commit status**: **committed** (`80a8eeb`).
+
+### STEP 2-F detail — Project Save / Load
+
+- **Files touched**: `src/align/project_io.py` (implemented from the previously-empty file) and `src/align/align_images.py` (Save/Load buttons + minimal state additions). `affine.py`, `image_view.py`, `control_points.py`, `polygon.py` were **not** modified.
+- **`project_io.py`** is pure Python (no Qt dependency): `get_project_root()`, `to_relative_path()`/`to_absolute_path()`, `control_points_to_list()`/`restore_control_points()`, `affine_matrix_to_list()`/`affine_matrix_from_list()`, `build_project_dict()`, `save_project()`, `load_project()`.
+- **`project.json` structure** (version 1): `t1_image`/`t2_image` (paths relative to project root, e.g. `projects/png/seoul_park_1PM.png`), `control_points` (list of `{name, t1, t2}`, only points with at least one coordinate set are saved), `affine_matrix` (2×3 list-of-lists or `null`), `aligned_image` (relative path or `null`).
+- **New MainWindow state** (previously only local variables): `self.affine_matrix` (set in `run_alignment()`), `self.aligned_image_path` (set in `_save_aligned_image()`). Both are required so Save Project can persist the exact computed values without recomputation.
+- **`affine.py`/`control_points.py` are not touched**: Affine values are saved/restored as-is (no recomputation), and `ControlPointManager`'s existing public attributes/methods (`points`, `current_point`, `current_index`, `state`, `create_next_point()`) are reused directly to restore Wizard state — no new Control Point system was created.
+- **GSD stays out of `project.json`**: GSD is not duplicated into the project file; `image_metadata.json` remains the single source of truth, looked up fresh via `update_gsd_info()` after Load.
+- **Verified with real data** (`seoul_park_1PM`/`seoul_park_3PM`): full round-trip (load → 4 Control Points → Run Alignment → Save Project → new `MainWindow` instance → Load Project) reproduced **byte-identical** Control Point coordinates and an **exactly identical** Affine Matrix (no floating-point drift), correctly restored the Overlay, and Opacity 0/50/100 worked identically after load.
+- **Exception handling verified**: (1) saving/loading before Alignment has been run → `affine_matrix`/`aligned_image` correctly saved and restored as `null`, no crash; (2) T1 image file missing at load time → load aborted with `"Project load failed: T1 image not found."`, no partial/corrupted state; (3) aligned image file missing but T1/T2/CP/Affine present → images, Control Points, and Affine Matrix are still restored, Overlay is simply not shown, with message `"...Aligned image not found. Control Points and image state were restored."`; (4) `project.json` file itself missing → clear `"Project load failed: ..."` message, no crash.
+- **Default save location**: "Save Project" suggests `projects/project.json` (via `QFileDialog.getSaveFileName`, user can change it). This location was chosen because the current `projects/` structure is flat (`tif/`, `png/`, `metadata/`, `aligned/`, `masks/` are siblings, not per-project subfolders), so a single `project.json` alongside them is the most natural fit for now — this may need revisiting if multi-project support is added later.
+- **Commit status**: implemented and verified, but **not yet committed** (`git status` shows `M src/align/align_images.py`, `M src/align/project_io.py`).
 
 ---
 
@@ -312,7 +327,7 @@ Drone Image → GeoTIFF
 
 **Reference Frame**: The end goal is not merely "images visually overlap" — all timepoints must ultimately share: same location, same coordinate reference, same pixel size (GSD), same image dimensions, same ROI. Currently, `warp_image()` only guarantees **same image dimensions** (pixel count) as T1; it does not yet guarantee same GSD/pixel size (see STEP 2-E conclusion in Section 9 — currently not needed for real data, but this is the eventual target if a future dataset needs it).
 
-**Repeatability**: A project's Control Points, Affine Matrix, Pixel Frame, ROI Polygon, and Metadata should eventually be persisted so that T3/T4/T5 can reuse the same baseline without re-doing Control Point selection from scratch. This is the responsibility of `project_io.py`, which is currently an empty placeholder.
+**Repeatability**: A project's Control Points, Affine Matrix, Pixel Frame, ROI Polygon, and Metadata should eventually be persisted so that T3/T4/T5 can reuse the same baseline without re-doing Control Point selection from scratch. As of STEP 2-F, `project_io.py` implements Save/Load for T1/T2 image paths, Control Points, and the Affine Matrix (see Section 9). Pixel Frame and ROI Polygon persistence are not yet part of `project.json` — they will need to be added once STEP 2's remaining sub-items (Pixel Frame unification, Polygon ROI) are implemented.
 
 ---
 
@@ -388,11 +403,12 @@ Usable for STEP 1 only (no OpenCV / PySide6):
 ## 15. Next Development Step
 
 **STEP 1 is complete and verified.**
-**STEP 2-A through STEP 2-E are complete and verified** (GUI, Control Points, Affine, Warp, Overlay + Opacity, GSD comparison/display). STEP 2-E is implemented but not yet committed.
+**STEP 2-A through STEP 2-F are complete and verified** (GUI, Control Points, Affine, Warp, Overlay + Opacity, GSD comparison/display, Project Save/Load). STEP 2-E is committed (`80a8eeb`); STEP 2-F (`project_io.py` + related `align_images.py` changes) is implemented and verified but **not yet committed**.
 
 **Open decision points for the next step** (not yet decided by the user):
-1. Commit STEP 2-E changes.
-2. Within STEP 2, whether to implement Polygon ROI (`polygon.py`) and/or Project Save/Load (`project_io.py`) next, or consider STEP 2 "done enough" and move to STEP 3 (Brightness Normalization).
+1. Commit STEP 2-F changes (`src/align/project_io.py`, `src/align/align_images.py`).
+2. Within STEP 2, whether to implement Polygon ROI (`polygon.py`) next, or consider STEP 2 "done enough" and move to STEP 3 (Brightness Normalization).
 3. If GSD differences are much larger in a future dataset, revisit whether explicit GSD Resampling (deferred in STEP 2-E) becomes necessary.
+4. Decide whether Pixel Frame unification and ROI persistence should be added to `project.json`'s schema once those features exist (current `version: 1` schema only covers images/Control Points/Affine/aligned image).
 
 Per the agent workflow rules in Section 14, the next actual implementation step should be scoped as a single, small, explicitly-requested task rather than inferred automatically from this document.

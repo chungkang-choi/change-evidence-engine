@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+from datetime import datetime
 import cv2
 
 from PySide6.QtCore import Qt
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from image_view import ImageView
 from control_points import ControlPointManager
 from affine import compute_affine, warp_image
+import project_io
 
 
 # --------------------------------------------------
@@ -144,6 +146,10 @@ class MainWindow(QMainWindow):
         # STEP 2-D: Alignment 결과 (aligned T2)
         self.aligned_img = None
 
+        # STEP 2-F: Project Save/Load를 위해 계산 결과를 상태로 보관한다.
+        self.affine_matrix = None
+        self.aligned_image_path = None
+
         self.cp_manager = ControlPointManager()
         self.selected_point = None
 
@@ -157,6 +163,15 @@ class MainWindow(QMainWindow):
         # ----------------------------
         self.load_btn = QPushButton("Load Images")
         self.load_btn.clicked.connect(self.load_images)
+
+        # ----------------------------
+        # Project Save / Load (STEP 2-F)
+        # ----------------------------
+        self.save_project_btn = QPushButton("Save Project")
+        self.save_project_btn.clicked.connect(self.save_project_dialog)
+
+        self.load_project_btn = QPushButton("Load Project")
+        self.load_project_btn.clicked.connect(self.load_project_dialog)
 
         # ----------------------------
         # 상태바
@@ -276,7 +291,12 @@ class MainWindow(QMainWindow):
         # ----------------------------
         main_layout = QVBoxLayout()
 
-        main_layout.addWidget(self.load_btn)
+        top_button_layout = QHBoxLayout()
+        top_button_layout.addWidget(self.load_btn)
+        top_button_layout.addWidget(self.save_project_btn)
+        top_button_layout.addWidget(self.load_project_btn)
+
+        main_layout.addLayout(top_button_layout)
         main_layout.addLayout(image_layout)
         main_layout.addWidget(self.status)
 
@@ -499,6 +519,8 @@ class MainWindow(QMainWindow):
             self.status.setText("Affine calculation failed. Check Control Points.")
             return
 
+        self.affine_matrix = matrix
+
         t1_h, t1_w = self.before_img.shape[:2]
 
         aligned = warp_image(self.after_img, matrix, (t1_w, t1_h))
@@ -533,14 +555,162 @@ class MainWindow(QMainWindow):
         os.makedirs(aligned_dir, exist_ok=True)
 
         t2_stem = os.path.splitext(os.path.basename(self.after_path))[0]
-        out_path = os.path.join(aligned_dir, f"aligned_{t2_stem}.png")
+
+        # Run Alignment을 다시 실행해도 원본 입력(T1/T2 PNG)은 물론
+        # 이전에 생성된 aligned 결과 파일도 덮어쓰지 않도록,
+        # 실행 시각을 포함한 새 파일명을 매번 생성한다.
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_name = f"aligned_{t2_stem}_{timestamp}"
+        out_path = os.path.join(aligned_dir, f"{base_name}.png")
+
+        suffix = 2
+        while os.path.exists(out_path):
+            out_path = os.path.join(aligned_dir, f"{base_name}_{suffix}.png")
+            suffix += 1
 
         ok = cv2.imwrite(out_path, self.aligned_img)
 
         if ok:
+            self.aligned_image_path = out_path
             self.status.setText(f"Alignment complete. Saved: {out_path}")
         else:
+            self.aligned_image_path = None
             self.status.setText("Alignment complete, but saving aligned image failed.")
+
+    # --------------------------------------------------
+    # STEP 2-F: Project Save / Load
+    # --------------------------------------------------
+
+    def save_project_dialog(self):
+
+        if self.before_path is None or self.after_path is None:
+            self.status.setText("Please load both T1 and T2 images before saving a project.")
+            return
+
+        project_root = project_io.get_project_root(__file__)
+        default_dir = os.path.join(project_root, "projects")
+        os.makedirs(default_dir, exist_ok=True)
+
+        default_path = os.path.join(default_dir, "project.json")
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project",
+            default_path,
+            "JSON (*.json)"
+        )
+
+        if not path:
+            return
+
+        if not path.lower().endswith(".json"):
+            path += ".json"
+
+        project_dict = project_io.build_project_dict(
+            self.before_path,
+            self.after_path,
+            self.cp_manager.get_points(),
+            self.affine_matrix,
+            self.aligned_image_path,
+            project_root,
+        )
+
+        try:
+            project_io.save_project(path, project_dict)
+        except Exception as e:
+            self.status.setText(f"Project save failed: {e}")
+            return
+
+        rel_path = project_io.to_relative_path(path, project_root)
+        self.status.setText(f"Project saved: {rel_path}")
+
+    def load_project_dialog(self):
+
+        project_root = project_io.get_project_root(__file__)
+        default_dir = os.path.join(project_root, "projects")
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Project",
+            default_dir,
+            "JSON (*.json)"
+        )
+
+        if not path:
+            return
+
+        try:
+            data = project_io.load_project(path)
+        except Exception as e:
+            self.status.setText(f"Project load failed: {e}")
+            return
+
+        t1_abs = project_io.to_absolute_path(data.get("t1_image"), project_root)
+        t2_abs = project_io.to_absolute_path(data.get("t2_image"), project_root)
+
+        if not t1_abs or not os.path.isfile(t1_abs):
+            self.status.setText("Project load failed: T1 image not found.")
+            return
+
+        if not t2_abs or not os.path.isfile(t2_abs):
+            self.status.setText("Project load failed: T2 image not found.")
+            return
+
+        before_img = cv2.imread(t1_abs)
+        after_img = cv2.imread(t2_abs)
+
+        if before_img is None or after_img is None:
+            self.status.setText("Project load failed: could not read T1/T2 image file.")
+            return
+
+        # ---- 이미지 상태 복원 (기존 load_images()와 동일한 방식 재사용) ----
+        self.before_img = before_img
+        self.after_img = after_img
+        self.before_path = t1_abs
+        self.after_path = t2_abs
+
+        self.before_view.set_cv_image(self.before_img)
+        self.after_view.set_cv_image(self.after_img)
+
+        # ---- Control Point 복원 (기존 ControlPointManager/ImageView 재사용) ----
+        project_io.restore_control_points(self.cp_manager, data.get("control_points"))
+        self.selected_point = None
+        self.point_tree.clearSelection()
+        self.update_cp_panel()
+        self.refresh_points()
+
+        # ---- Affine Matrix 복원 (재계산하지 않고 저장된 값을 그대로 사용) ----
+        self.affine_matrix = project_io.affine_matrix_from_list(data.get("affine_matrix"))
+
+        # ---- aligned image / Overlay 복원 ----
+        self.aligned_img = None
+        self.aligned_image_path = None
+        aligned_note = ""
+
+        aligned_rel = data.get("aligned_image")
+
+        if aligned_rel:
+            aligned_abs = project_io.to_absolute_path(aligned_rel, project_root)
+
+            if aligned_abs and os.path.isfile(aligned_abs):
+                aligned_img = cv2.imread(aligned_abs)
+
+                if aligned_img is not None:
+                    self.aligned_img = aligned_img
+                    self.aligned_image_path = aligned_abs
+
+                    self.overlay_view.set_cv_image(self.before_img)
+                    self.overlay_view.set_overlay_image(self.aligned_img)
+                    self.overlay_view.set_overlay_opacity(self.opacity_slider.value() / 100.0)
+                else:
+                    aligned_note = " Aligned image could not be read."
+            else:
+                aligned_note = " Aligned image not found. Control Points and image state were restored."
+
+        self.update_gsd_info()
+
+        rel_path = project_io.to_relative_path(path, project_root)
+        self.status.setText(f"Project loaded: {rel_path}.{aligned_note}")
 
 
 def main():

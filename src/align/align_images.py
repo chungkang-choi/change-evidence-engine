@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from image_view import ImageView
 from control_points import ControlPointManager
 from affine import compute_affine, warp_image
+from polygon import points_to_mask
 import project_io
 
 
@@ -150,6 +151,12 @@ class MainWindow(QMainWindow):
         self.affine_matrix = None
         self.aligned_image_path = None
 
+        # STEP 2-G: Polygon ROI 상태. ControlPointManager와 완전히 분리해서 관리한다.
+        self.roi_drawing_mode = False
+        self.roi_points = []
+        self.roi_mask = None
+        self.roi_mask_path = None
+
         self.cp_manager = ControlPointManager()
         self.selected_point = None
 
@@ -273,6 +280,32 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.point_tree)
         control_layout.addWidget(self.delete_btn)
         control_layout.addWidget(self.reset_btn)
+
+        # ----------------------------
+        # Polygon ROI (STEP 2-G) — Control Point 패널과 구분되는 별도 영역
+        # ----------------------------
+        roi_title = QLabel("Polygon ROI (T1)")
+        roi_title.setStyleSheet("font-weight:bold; margin-top: 10px;")
+
+        self.roi_status_label = QLabel("ROI: not set")
+
+        self.start_roi_btn = QPushButton("Start ROI")
+        self.start_roi_btn.clicked.connect(self.start_roi)
+
+        self.complete_roi_btn = QPushButton("Complete ROI")
+        self.complete_roi_btn.clicked.connect(self.complete_roi)
+        self.complete_roi_btn.setStyleSheet("background-color: #2196f3; color: white; font-weight: bold; padding: 6px;")
+
+        self.reset_roi_btn = QPushButton("Reset ROI")
+        self.reset_roi_btn.clicked.connect(self.reset_roi)
+        self.reset_roi_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; padding: 6px;")
+
+        control_layout.addWidget(roi_title)
+        control_layout.addWidget(self.roi_status_label)
+        control_layout.addWidget(self.start_roi_btn)
+        control_layout.addWidget(self.complete_roi_btn)
+        control_layout.addWidget(self.reset_roi_btn)
+
         self.update_cp_panel()
 
 
@@ -372,6 +405,19 @@ class MainWindow(QMainWindow):
         self.gsd_info_label.setText(text)
 
     def image_clicked(self, image_name, x, y):
+
+        if self.roi_drawing_mode:
+            if image_name != "T1":
+                self.status.setText("ROI vertices can only be added on T1.")
+                return
+
+            self.roi_points.append((x, y))
+            self.before_view.set_polygon(self.roi_points)
+            self.roi_status_label.setText(f"ROI: drawing ({len(self.roi_points)} points)")
+            self.status.setText(
+                f"ROI vertex {len(self.roi_points)} added: ({int(x)}, {int(y)})"
+            )
+            return
 
         if self.selected_point is not None:
             self.cp_manager.update_point(
@@ -578,6 +624,86 @@ class MainWindow(QMainWindow):
             self.status.setText("Alignment complete, but saving aligned image failed.")
 
     # --------------------------------------------------
+    # STEP 2-G: Polygon ROI
+    # --------------------------------------------------
+
+    def start_roi(self):
+
+        if self.before_img is None:
+            self.status.setText("Please load T1 image before drawing an ROI.")
+            return
+
+        self.roi_drawing_mode = True
+        self.roi_points = []
+
+        self.before_view.clear_polygon()
+
+        self.roi_status_label.setText("ROI: drawing (click T1 to add vertices)")
+        self.status.setText("ROI drawing started. Click on T1 to add vertices (min. 3).")
+
+    def complete_roi(self):
+
+        if not self.roi_drawing_mode:
+            self.status.setText("Start ROI first.")
+            return
+
+        if len(self.roi_points) < 3:
+            self.status.setText("ROI requires at least 3 points.")
+            return
+
+        self.roi_drawing_mode = False
+
+        # QGraphicsPolygonItem은 항상 마지막 vertex를 첫 vertex와 연결한
+        # 닫힌 도형으로 그리므로, 별도의 "닫기" 처리 없이 그대로 다시 표시한다.
+        self.before_view.set_polygon(self.roi_points)
+
+        mask = points_to_mask(self.roi_points, self.before_img.shape[:2])
+
+        if mask is None:
+            self.status.setText("ROI mask generation failed.")
+            return
+
+        self.roi_mask = mask
+
+        self._save_roi_mask()
+
+    def reset_roi(self):
+
+        self.roi_drawing_mode = False
+        self.roi_points = []
+        self.roi_mask = None
+        self.roi_mask_path = None
+
+        self.before_view.clear_polygon()
+
+        self.roi_status_label.setText("ROI: not set")
+        self.status.setText("ROI Reset")
+
+    def _save_roi_mask(self):
+
+        if self.roi_mask is None:
+            return
+
+        project_root = project_io.get_project_root(__file__)
+        masks_dir = os.path.join(project_root, "projects", "masks")
+
+        os.makedirs(masks_dir, exist_ok=True)
+
+        # ROI mask는 프로젝트당 하나의 확정 결과로 취급하므로, aligned image와
+        # 달리 timestamp를 붙이지 않고 고정 파일명(roi_mask.png)에 덮어쓴다.
+        out_path = os.path.join(masks_dir, "roi_mask.png")
+
+        ok = cv2.imwrite(out_path, self.roi_mask)
+
+        if ok:
+            self.roi_mask_path = out_path
+            self.roi_status_label.setText(f"ROI: {len(self.roi_points)} points, mask saved")
+            self.status.setText(f"ROI complete. Mask saved: {out_path}")
+        else:
+            self.roi_mask_path = None
+            self.status.setText("ROI complete, but saving mask failed.")
+
+    # --------------------------------------------------
     # STEP 2-F: Project Save / Load
     # --------------------------------------------------
 
@@ -613,6 +739,8 @@ class MainWindow(QMainWindow):
             self.affine_matrix,
             self.aligned_image_path,
             project_root,
+            self.roi_points,
+            self.roi_mask_path,
         )
 
         try:
@@ -707,10 +835,46 @@ class MainWindow(QMainWindow):
             else:
                 aligned_note = " Aligned image not found. Control Points and image state were restored."
 
+        # ---- ROI Polygon / Mask 복원 (STEP 2-G) ----
+        self.roi_drawing_mode = False
+        self.roi_points = project_io.roi_polygon_from_list(data.get("roi_polygon")) or []
+        self.roi_mask = None
+        self.roi_mask_path = None
+
+        self.before_view.clear_polygon()
+
+        roi_note = ""
+
+        if self.roi_points:
+            self.before_view.set_polygon(self.roi_points)
+
+            roi_mask_rel = data.get("roi_mask")
+
+            if roi_mask_rel:
+                roi_mask_abs = project_io.to_absolute_path(roi_mask_rel, project_root)
+
+                if roi_mask_abs and os.path.isfile(roi_mask_abs):
+                    roi_mask_img = cv2.imread(roi_mask_abs, cv2.IMREAD_GRAYSCALE)
+
+                    if roi_mask_img is not None:
+                        self.roi_mask = roi_mask_img
+                        self.roi_mask_path = roi_mask_abs
+                        self.roi_status_label.setText(f"ROI: {len(self.roi_points)} points, mask restored")
+                    else:
+                        roi_note = " ROI mask could not be read."
+                        self.roi_status_label.setText(f"ROI: {len(self.roi_points)} points, mask unavailable")
+                else:
+                    roi_note = " ROI mask not found."
+                    self.roi_status_label.setText(f"ROI: {len(self.roi_points)} points, mask unavailable")
+            else:
+                self.roi_status_label.setText(f"ROI: {len(self.roi_points)} points (no mask)")
+        else:
+            self.roi_status_label.setText("ROI: not set")
+
         self.update_gsd_info()
 
         rel_path = project_io.to_relative_path(path, project_root)
-        self.status.setText(f"Project loaded: {rel_path}.{aligned_note}")
+        self.status.setText(f"Project loaded: {rel_path}.{aligned_note}{roi_note}")
 
 
 def main():

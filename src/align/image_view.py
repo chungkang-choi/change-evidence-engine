@@ -1,6 +1,6 @@
 import cv2
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPointF
 from PySide6.QtGui import (
     QColor,
     QBrush,
@@ -8,6 +8,7 @@ from PySide6.QtGui import (
     QImage,
     QPixmap,
     QFont,
+    QPolygonF,
 )
 
 from PySide6.QtWidgets import (
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsEllipseItem,
     QGraphicsSimpleTextItem,
+    QGraphicsPolygonItem,
 )
 
 
@@ -40,6 +42,11 @@ class ImageView(QGraphicsView):
         # Overlay (STEP 2-D)
         # -----------------------------
         self.overlay_pixmap_item = None
+
+        # -----------------------------
+        # Polygon ROI (STEP 2-G)
+        # -----------------------------
+        self.polygon_item = None
 
         # -----------------------------
         # Point 관리
@@ -84,8 +91,9 @@ class ImageView(QGraphicsView):
 
         self.point_items.clear()
 
-        # scene.clear()가 기존 overlay item도 함께 제거하므로 참조를 초기화한다.
+        # scene.clear()가 기존 overlay/polygon item도 함께 제거하므로 참조를 초기화한다.
         self.overlay_pixmap_item = None
+        self.polygon_item = None
 
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
 
@@ -145,6 +153,42 @@ class ImageView(QGraphicsView):
         if self.overlay_pixmap_item is not None:
 
             self.overlay_pixmap_item.setOpacity(opacity)
+
+    # --------------------------------------------------
+    # Polygon ROI (STEP 2-G)
+    # --------------------------------------------------
+
+    def set_polygon(self, points):
+        """Polygon vertex 목록(scene/pixel 좌표)을 닫힌 도형으로 표시한다.
+
+        QGraphicsPolygonItem은 항상 마지막 vertex를 첫 vertex와 연결한
+        닫힌 도형으로 그려지므로 별도의 "닫기" 처리가 필요 없다.
+        기존 Control Point 표시(add_point()/point_items)와는 완전히 독립적으로
+        동작하며, 서로의 목록/상태에 영향을 주지 않는다.
+        """
+        self.clear_polygon()
+
+        if not points:
+            return
+
+        qpoints = [QPointF(x, y) for x, y in points]
+
+        self.polygon_item = QGraphicsPolygonItem(QPolygonF(qpoints))
+        self.polygon_item.setPen(QPen(QColor("yellow"), 4))
+        self.polygon_item.setBrush(QBrush(QColor(255, 255, 0, 60)))
+        self.polygon_item.setZValue(2)
+
+        self.scene.addItem(self.polygon_item)
+
+    # --------------------------------------------------
+
+    def clear_polygon(self):
+
+        if self.polygon_item is not None:
+
+            self.scene.removeItem(self.polygon_item)
+
+            self.polygon_item = None
 
     # --------------------------------------------------
     # Point Drawing

@@ -163,11 +163,44 @@ def affine_matrix_from_list(matrix_list):
 
 
 # --------------------------------------------------
+# Polygon ROI 직렬화 / 복원 (STEP 2-G)
+# --------------------------------------------------
+
+def roi_polygon_to_list(roi_points):
+    """ROI Polygon vertex 목록을 JSON 직렬화 가능한 list[list[float]]로 변환한다.
+
+    좌표 값 자체는 변경하지 않는다 (재계산/반올림 없음). Vertex가 없으면 None.
+    """
+    if not roi_points:
+        return None
+
+    return [[float(x), float(y)] for x, y in roi_points]
+
+
+def roi_polygon_from_list(polygon_list):
+    """project.json에 저장된 roi_polygon을 [(x, y), ...] 목록으로 복원한다.
+
+    값이 없거나 None이면 None을 반환한다 (기존 project.json과의 하위 호환).
+    """
+    if not polygon_list:
+        return None
+
+    return [(float(x), float(y)) for x, y in polygon_list]
+
+
+# --------------------------------------------------
 # Project dict 구성 / 저장 / 로드
 # --------------------------------------------------
 
-def build_project_dict(t1_path, t2_path, control_points, affine_matrix, aligned_path, project_root):
-    """현재 Alignment 작업 상태로부터 저장용 dict를 구성한다."""
+def build_project_dict(t1_path, t2_path, control_points, affine_matrix, aligned_path,
+                        project_root, roi_polygon=None, roi_mask_path=None):
+    """현재 Alignment/ROI 작업 상태로부터 저장용 dict를 구성한다.
+
+    roi_polygon/roi_mask_path는 STEP 2-F 시점의 project.json과 하위 호환되도록
+    선택적(optional) 인자로 두었다 — 지정하지 않으면 각각 null로 저장된다.
+    GSD/CRS/transform 등 원본 metadata는 여기에 저장하지 않는다
+    (image_metadata.json이 Single Source of Truth).
+    """
     return {
         "version": PROJECT_FILE_VERSION,
         "t1_image": to_relative_path(t1_path, project_root),
@@ -175,6 +208,8 @@ def build_project_dict(t1_path, t2_path, control_points, affine_matrix, aligned_
         "control_points": control_points_to_list(control_points),
         "affine_matrix": affine_matrix_to_list(affine_matrix),
         "aligned_image": to_relative_path(aligned_path, project_root),
+        "roi_polygon": roi_polygon_to_list(roi_polygon),
+        "roi_mask": to_relative_path(roi_mask_path, project_root),
     }
 
 
